@@ -3,6 +3,7 @@
 
 // STD
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 
 // SEALNet
@@ -29,6 +30,10 @@ using ph = struct Plaintext::PlaintextPrivateHelper
     static void swap_data(seal::Plaintext *plain, seal::DynArray<uint64_t> &new_data)
     {
         swap(plain->data_, new_data);
+        // Keep the logical coefficient count in sync with the installed buffer, as
+        // Plaintext::resize does. Readers such as significant_coeff_count, nonzero_coeff_count,
+        // and to_string index the buffer with coeff_count_.
+        plain->coeff_count_ = plain->data_.size();
     }
 
     static void set(seal::Plaintext *plain, uint64_t coeff_count, uint64_t *coeffs)
@@ -432,6 +437,14 @@ SEAL_C_FUNC Plaintext_SwapData(void *thisptr, uint64_t count, uint64_t *new_data
 
     try
     {
+        // Plaintext::resize refuses to change the size of an NTT transformed plaintext, whose
+        // coeff_count is pinned to the encryption parameters. Apply the same rule here so a
+        // successful call cannot leave the plaintext invalid for its own parms_id.
+        if (plain->is_ntt_form() && count != plain->coeff_count())
+        {
+            throw logic_error("cannot resize an NTT transformed Plaintext");
+        }
+
         DynArray<uint64_t> new_array(plain->pool());
         new_array.resize(count);
         copy_n(new_data, count, new_array.begin());

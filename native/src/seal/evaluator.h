@@ -71,6 +71,13 @@ namespace seal
     input(s), with the exception of the transform_to_ntt and transform_from_ntt functions, which change the state.
     Ideally, unless these two functions are called, all other functions should "just work".
 
+    @par Destination Parameters
+    Many operations come in a variant that writes to a separate destination parameter instead of operating in place.
+    Unless a function documents otherwise, these variants use destination as scratch space, so if the operation throws,
+    the contents of destination are unspecified and any value it held before the call may have been overwritten. The
+    exceptions are add_many and multiply_many, which complete all validation and computation before they write to
+    destination.
+
     @see EncryptionParameters for more details on encryption parameters.
     @see BatchEncoder for more details on batching
     @see RelinKeys for more details on relinearization keys.

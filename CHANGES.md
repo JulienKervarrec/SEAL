@@ -1,5 +1,16 @@
 # List of Changes
 
+## Version 4.4.4
+
+- Fixed `CKKSEncoder::encode(std::int64_t, ...)` ([issue #757](https://github.com/microsoft/SEAL/issues/757)) to encode negative values whose magnitude exceeds a coefficient modulus, and to handle `INT64_MIN` without undefined behavior.
+- Fixed `Evaluator::add_many` and `Evaluator::multiply_many` ([issue #759](https://github.com/microsoft/SEAL/issues/759)) to validate every input ciphertext, including for a single-element vector.
+- Fixed `Evaluator::add_many` ([issue #760](https://github.com/microsoft/SEAL/issues/760)) to leave `destination` unchanged when it throws, and documented the state of `destination` for the other destination-taking overloads.
+- Fixed `Evaluator::apply_galois_inplace` ([issue #761](https://github.com/microsoft/SEAL/issues/761)) to validate the selected Galois key before modifying the ciphertext.
+- Fixed `Plaintext_SwapData` in the C API ([issue #762](https://github.com/microsoft/SEAL/issues/762)) to keep the coefficient count in sync with the installed buffer, and to reject a swap that would resize an NTT transformed plaintext; a shorter buffer left later reads out of bounds.
+- Fixed `Evaluator::relinearize`, `Evaluator::exponentiate`, `Evaluator::mod_switch_to`, and `Evaluator::mod_reduce_to` to validate the ciphertext on the paths that return without performing any operation.
+- Fixed `Evaluator::multiply_plain` to verify that the ciphertext and plaintext match before transforming the ciphertext.
+- Fixed undefined behavior for the most negative representable rotation step in `GaloisTool::get_elt_from_step` and `util::naf`.
+
 ## Version 4.4.3
 
 - Fixed null-output-pointer dereferences in the C API ([issue #753](https://github.com/microsoft/SEAL/issues/753)): `ContextData_Parms` and `Modulus_Create2` wrote the created handle without validating the output pointer.

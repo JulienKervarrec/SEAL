@@ -6493,4 +6493,349 @@ namespace sealtest
         ASSERT_TRUE(encrypted.parms_id() == parms_id);
         ASSERT_TRUE(plain.to_string() == "5x^64 + Ax^5");
     }
+
+    TEST(EvaluatorTest, AddManyValidatesEveryInput)
+    {
+        auto make_parms = [](vector<int> bit_sizes) {
+            EncryptionParameters parms(scheme_type::bfv);
+            parms.set_poly_modulus_degree(128);
+            parms.set_coeff_modulus(CoeffModulus::Create(128, bit_sizes));
+            parms.set_plain_modulus(1 << 6);
+            return parms;
+        };
+
+        SEALContext foreign_context(make_parms({ 50, 50, 50 }), false, sec_level_type::none);
+        SEALContext context(make_parms({ 40, 40, 40 }), false, sec_level_type::none);
+
+        KeyGenerator foreign_keygen(foreign_context);
+        PublicKey foreign_pk;
+        foreign_keygen.create_public_key(foreign_pk);
+        Encryptor foreign_encryptor(foreign_context, foreign_pk);
+        Ciphertext foreign;
+        foreign_encryptor.encrypt(Plaintext("1"), foreign);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("2"), destination);
+        ASSERT_FALSE(is_valid_for(foreign, context));
+
+        // A single-element vector must be validated too.
+        ASSERT_THROW(evaluator.add_many(vector<Ciphertext>{ foreign }, destination), invalid_argument);
+        Plaintext plain;
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+
+        ASSERT_THROW(evaluator.add_many(vector<Ciphertext>{ foreign, foreign }, destination), invalid_argument);
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+    }
+
+    TEST(EvaluatorTest, AddManyPreservesDestinationOnThrow)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, true, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext first;
+        encryptor.encrypt(Plaintext("1"), first);
+        Ciphertext mismatched = first;
+        evaluator.mod_switch_to_next_inplace(mismatched);
+
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("2"), destination);
+        auto destination_parms_id = destination.parms_id();
+
+        ASSERT_THROW(evaluator.add_many(vector<Ciphertext>{ first, mismatched }, destination), invalid_argument);
+
+        Plaintext plain;
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+        ASSERT_TRUE(destination.parms_id() == destination_parms_id);
+    }
+
+    TEST(EvaluatorTest, MultiplyManyValidatesEveryInput)
+    {
+        auto make_parms = [](vector<int> bit_sizes) {
+            EncryptionParameters parms(scheme_type::bfv);
+            parms.set_poly_modulus_degree(128);
+            parms.set_coeff_modulus(CoeffModulus::Create(128, bit_sizes));
+            parms.set_plain_modulus(1 << 6);
+            return parms;
+        };
+
+        SEALContext foreign_context(make_parms({ 50, 50, 50 }), false, sec_level_type::none);
+        SEALContext context(make_parms({ 40, 40, 40 }), false, sec_level_type::none);
+
+        KeyGenerator foreign_keygen(foreign_context);
+        PublicKey foreign_pk;
+        foreign_keygen.create_public_key(foreign_pk);
+        Encryptor foreign_encryptor(foreign_context, foreign_pk);
+        Ciphertext foreign;
+        foreign_encryptor.encrypt(Plaintext("1"), foreign);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        RelinKeys rlk;
+        keygen.create_relin_keys(rlk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("2"), destination);
+
+        ASSERT_THROW(evaluator.multiply_many(vector<Ciphertext>{ foreign }, rlk, destination), invalid_argument);
+        Plaintext plain;
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+
+        ASSERT_THROW(
+            evaluator.multiply_many(vector<Ciphertext>{ foreign, foreign }, rlk, destination), invalid_argument);
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+
+        // A ciphertext whose parms_id resolves in this context but whose metadata does not
+        // match it is rejected on the same path.
+        Ciphertext wrong_scale;
+        encryptor.encrypt(Plaintext("3"), wrong_scale);
+        wrong_scale.scale() = 2.0;
+        ASSERT_TRUE(context.get_context_data(wrong_scale.parms_id()) != nullptr);
+        ASSERT_FALSE(is_valid_for(wrong_scale, context));
+
+        ASSERT_THROW(evaluator.multiply_many(vector<Ciphertext>{ wrong_scale }, rlk, destination), invalid_argument);
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+    }
+
+    TEST(EvaluatorTest, MultiplyManyPreservesDestinationOnThrow)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, true, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        RelinKeys rlk;
+        keygen.create_relin_keys(rlk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext first;
+        encryptor.encrypt(Plaintext("1"), first);
+        Ciphertext mismatched = first;
+        evaluator.mod_switch_to_next_inplace(mismatched);
+
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("2"), destination);
+        auto destination_parms_id = destination.parms_id();
+
+        ASSERT_THROW(
+            evaluator.multiply_many(vector<Ciphertext>{ first, mismatched }, rlk, destination), invalid_argument);
+
+        Plaintext plain;
+        decryptor.decrypt(destination, plain);
+        ASSERT_TRUE(plain.to_string() == "2");
+        ASSERT_TRUE(destination.parms_id() == destination_parms_id);
+    }
+
+    TEST(EvaluatorTest, ExponentiateValidatesCiphertext)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, false, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        RelinKeys rlk;
+        keygen.create_relin_keys(rlk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext encrypted;
+        encryptor.encrypt(Plaintext("2"), encrypted);
+        encrypted.scale() = 2.0;
+        ASSERT_TRUE(context.get_context_data(encrypted.parms_id()) != nullptr);
+        ASSERT_FALSE(is_valid_for(encrypted, context));
+
+        // The exponent == 1 fast path returns without reaching multiply_many.
+        ASSERT_THROW(evaluator.exponentiate_inplace(encrypted, 1, rlk), invalid_argument);
+        ASSERT_THROW(evaluator.exponentiate_inplace(encrypted, 2, rlk), invalid_argument);
+
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("3"), destination);
+        ASSERT_THROW(evaluator.exponentiate(encrypted, 1, rlk, destination), invalid_argument);
+    }
+
+    TEST(EvaluatorTest, ModSwitchToValidatesCiphertext)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, true, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        Encryptor encryptor(context, pk);
+        Evaluator evaluator(context);
+
+        Ciphertext encrypted;
+        encryptor.encrypt(Plaintext("2"), encrypted);
+        encrypted.scale() = 2.0;
+        ASSERT_FALSE(is_valid_for(encrypted, context));
+
+        // Switching to the level the ciphertext already occupies performs no iterations.
+        auto same_parms_id = encrypted.parms_id();
+        ASSERT_THROW(evaluator.mod_switch_to_inplace(encrypted, same_parms_id), invalid_argument);
+        ASSERT_THROW(evaluator.mod_reduce_to_inplace(encrypted, same_parms_id), invalid_argument);
+    }
+
+    TEST(EvaluatorTest, MultiplyPlainValidatesBeforeTransforming)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, true, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext encrypted;
+        encryptor.encrypt(Plaintext("2"), encrypted);
+        ASSERT_FALSE(encrypted.is_ntt_form());
+
+        // An NTT-form plaintext at a level the ciphertext is not at.
+        Plaintext plain("3");
+        auto next_parms_id = context.first_context_data()->next_context_data()->parms_id();
+        evaluator.transform_to_ntt_inplace(plain, next_parms_id);
+        ASSERT_TRUE(plain.parms_id() != encrypted.parms_id());
+
+        ASSERT_THROW(evaluator.multiply_plain_inplace(encrypted, plain), invalid_argument);
+
+        // The ciphertext must not have been transformed on the way to that throw.
+        ASSERT_FALSE(encrypted.is_ntt_form());
+        Plaintext result;
+        decryptor.decrypt(encrypted, result);
+        ASSERT_TRUE(result.to_string() == "2");
+    }
+
+    TEST(EvaluatorTest, RelinearizeValidatesCiphertext)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(1 << 6);
+        SEALContext context(parms, false, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        RelinKeys rlk;
+        keygen.create_relin_keys(rlk);
+        Encryptor encryptor(context, pk);
+        Evaluator evaluator(context);
+
+        Ciphertext encrypted;
+        encryptor.encrypt(Plaintext("2"), encrypted);
+        encrypted.scale() = 2.0;
+        ASSERT_TRUE(context.get_context_data(encrypted.parms_id()) != nullptr);
+        ASSERT_FALSE(is_valid_for(encrypted, context));
+
+        // A ciphertext that is already at the destination size takes the early return.
+        ASSERT_TRUE(encrypted.size() == 2);
+        ASSERT_THROW(evaluator.relinearize_inplace(encrypted, rlk), invalid_argument);
+
+        // The destination-taking overload uses destination as scratch space, so only the
+        // rejection is guaranteed here.
+        Ciphertext destination;
+        encryptor.encrypt(Plaintext("3"), destination);
+        ASSERT_THROW(evaluator.relinearize(encrypted, rlk, destination), invalid_argument);
+    }
+
+    TEST(EvaluatorTest, ApplyGaloisValidatesKeysBeforeMutating)
+    {
+        EncryptionParameters parms(scheme_type::bfv);
+        parms.set_poly_modulus_degree(128);
+        parms.set_coeff_modulus(CoeffModulus::Create(128, { 40, 40, 40 }));
+        parms.set_plain_modulus(257);
+        SEALContext context(parms, false, sec_level_type::none);
+
+        KeyGenerator keygen(context);
+        PublicKey pk;
+        keygen.create_public_key(pk);
+        Encryptor encryptor(context, pk);
+        Decryptor decryptor(context, keygen.secret_key());
+        Evaluator evaluator(context);
+
+        Ciphertext encrypted;
+        encryptor.encrypt(Plaintext("1x^1 + 2"), encrypted);
+        vector<uint64_t> before(
+            encrypted.data(),
+            encrypted.data() + encrypted.size() * encrypted.coeff_modulus_size() * encrypted.poly_modulus_degree());
+
+        uint32_t galois_elt = context.key_context_data()->galois_tool()->get_elt_from_step(1);
+        size_t index = GaloisKeys::get_index(galois_elt);
+
+        // has_key only checks that the outer slot is non-empty, so this passes that check while
+        // the selected inner key vector is unusable.
+        GaloisKeys malformed;
+        malformed.parms_id() = context.key_parms_id();
+        malformed.data().resize(index + 1);
+        malformed.data()[index].emplace_back();
+        ASSERT_TRUE(malformed.has_key(galois_elt));
+        ASSERT_FALSE(is_metadata_valid_for(malformed, context));
+
+        ASSERT_THROW(evaluator.apply_galois_inplace(encrypted, galois_elt, malformed), invalid_argument);
+
+        vector<uint64_t> after(
+            encrypted.data(),
+            encrypted.data() + encrypted.size() * encrypted.coeff_modulus_size() * encrypted.poly_modulus_degree());
+        ASSERT_TRUE(before == after);
+
+        Plaintext plain;
+        decryptor.decrypt(encrypted, plain);
+        ASSERT_TRUE(plain.to_string() == "1x^1 + 2");
+
+        // An inner vector of the right length but holding an invalid key is also rejected first.
+        GaloisKeys wrong_keys;
+        wrong_keys.parms_id() = context.key_parms_id();
+        wrong_keys.data().resize(index + 1);
+        wrong_keys.data()[index].resize(context.first_context_data()->parms().coeff_modulus().size());
+        ASSERT_THROW(evaluator.apply_galois_inplace(encrypted, galois_elt, wrong_keys), invalid_argument);
+
+        vector<uint64_t> after_second(
+            encrypted.data(),
+            encrypted.data() + encrypted.size() * encrypted.coeff_modulus_size() * encrypted.poly_modulus_degree());
+        ASSERT_TRUE(before == after_second);
+    }
 } // namespace sealtest

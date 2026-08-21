@@ -4,6 +4,7 @@
 #include "seal/context.h"
 #include "seal/memorymanager.h"
 #include "seal/util/galois.h"
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #include "gtest/gtest.h"
@@ -38,6 +39,20 @@ namespace sealtest
                 ASSERT_EQ(11U, galois_tool.get_elt_from_step(3));
                 ASSERT_EQ(11U, galois_tool.get_elt_from_step(-1));
             }
+        }
+
+        TEST(GaloisToolTest, EltFromStepRejectsExtremeSteps)
+        {
+            auto pool = MemoryManager::GetPool();
+            GaloisTool galois_tool(3, pool);
+
+            // The magnitude of these steps exceeds half the polynomial degree. INT_MIN has no
+            // representable negation as a signed integer and must be handled like any other
+            // out-of-range step.
+            ASSERT_THROW(galois_tool.get_elt_from_step((numeric_limits<int>::min)()), invalid_argument);
+            ASSERT_THROW(galois_tool.get_elt_from_step((numeric_limits<int>::max)()), invalid_argument);
+            ASSERT_THROW(galois_tool.get_elt_from_step(4), invalid_argument);
+            ASSERT_THROW(galois_tool.get_elt_from_step(-4), invalid_argument);
         }
 
         TEST(GaloisToolTest, EltsFromSteps)

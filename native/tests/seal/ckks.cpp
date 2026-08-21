@@ -318,6 +318,74 @@ namespace sealtest
             invalid_argument);
     }
 
+    TEST(CKKSEncoderTest, CKKSEncoderEncodeIntegerSignedTest)
+    {
+        {
+            EncryptionParameters parms(scheme_type::ckks);
+            parms.set_poly_modulus_degree(64);
+            parms.set_coeff_modulus(CoeffModulus::Create(64, { 60, 40, 40, 60 }));
+            SEALContext context(parms, false, sec_level_type::none);
+            CKKSEncoder encoder(context);
+
+            // The chain holds 40-bit primes, so these magnitudes straddle the individual moduli.
+            int64_t values[]{ 0,
+                              5,
+                              -5,
+                              -(int64_t(1) << 39),
+                              -(int64_t(1) << 40),
+                              -(int64_t(1) << 41),
+                              (int64_t(1) << 41),
+                              -(int64_t(1) << 62),
+                              (numeric_limits<int64_t>::min)() };
+
+            Plaintext plain;
+            vector<complex<double>> result;
+            for (int64_t value : values)
+            {
+                encoder.encode(value, context.first_parms_id(), plain);
+                encoder.decode(plain, result);
+
+                double expected = static_cast<double>(value);
+                double tolerance = 0.5 + abs(expected) * 1e-9;
+                for (size_t i = 0; i < encoder.slot_count(); i++)
+                {
+                    ASSERT_TRUE(abs(result[i].real() - expected) < tolerance);
+                    ASSERT_TRUE(abs(result[i].imag()) < tolerance);
+                }
+            }
+
+            // The integer overload must agree with the floating-point overload at unit scale.
+            Plaintext plain_double;
+            vector<complex<double>> result_double;
+            for (int64_t value : values)
+            {
+                if (value < -(int64_t(1) << 53))
+                {
+                    continue;
+                }
+                encoder.encode(value, context.first_parms_id(), plain);
+                encoder.encode(static_cast<double>(value), context.first_parms_id(), 1.0, plain_double);
+                encoder.decode(plain, result);
+                encoder.decode(plain_double, result_double);
+                ASSERT_TRUE(abs(result[0].real() - result_double[0].real()) < 0.5);
+            }
+        }
+        {
+            // The unsigned magnitude drives the range check, including for INT64_MIN.
+            EncryptionParameters parms(scheme_type::ckks);
+            parms.set_poly_modulus_degree(64);
+            parms.set_coeff_modulus(CoeffModulus::Create(64, { 30, 30 }));
+            SEALContext context(parms, false, sec_level_type::none);
+            CKKSEncoder encoder(context);
+
+            Plaintext plain;
+            ASSERT_THROW(
+                encoder.encode((numeric_limits<int64_t>::min)(), context.first_parms_id(), plain), invalid_argument);
+            ASSERT_THROW(encoder.encode(-(int64_t(1) << 40), context.first_parms_id(), plain), invalid_argument);
+            encoder.encode(int64_t(-100), context.first_parms_id(), plain);
+        }
+    }
+
     TEST(CKKSEncoderTest, CKKSEncoderEncodeSingleDecodeTest)
     {
         EncryptionParameters parms(scheme_type::ckks);

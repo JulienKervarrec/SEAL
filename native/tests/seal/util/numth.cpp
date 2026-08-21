@@ -6,7 +6,9 @@
 #include "seal/util/uintarith.h"
 #include "seal/util/uintarithsmallmod.h"
 #include <cstdint>
+#include <limits>
 #include <numeric>
+#include <stdexcept>
 #include "gtest/gtest.h"
 
 using namespace seal;
@@ -150,6 +152,17 @@ namespace sealtest
             ASSERT_EQ(123, accumulate(naf_vec.begin(), naf_vec.end(), 0));
             naf_vec = naf(-123);
             ASSERT_EQ(-123, accumulate(naf_vec.begin(), naf_vec.end(), 0));
+
+            // INT_MIN has no representable negation as a signed integer. Accumulate in a wider
+            // type because the terms sum to a value that only just fits in an int.
+            naf_vec = naf((numeric_limits<int>::min)());
+            ASSERT_EQ(
+                static_cast<int64_t>((numeric_limits<int>::min)()),
+                accumulate(naf_vec.begin(), naf_vec.end(), int64_t(0)));
+
+            // The non-adjacent form of INT_MAX needs a term of 2^31, which no int can hold, so
+            // the conversion is rejected instead of wrapping.
+            ASSERT_THROW(naf((numeric_limits<int>::max)()), logic_error);
         }
 
         TEST(NumberTheory, TryPrimitiveRootMod)

@@ -253,11 +253,23 @@ namespace seal
             }
         }
 
-        destination = encrypteds[0];
+        // add_inplace validates encrypteds[1..] but never sees encrypteds[0], so check it here.
+        // A one-element vector would otherwise skip validation entirely.
+        if (!is_metadata_valid_for(encrypteds[0], context_) || !is_buffer_valid(encrypteds[0]))
+        {
+            throw invalid_argument("encrypteds is not valid for encryption parameters");
+        }
+
+        // Accumulate into a temporary so that a throw from add_inplace leaves destination
+        // holding its previous value. The temporary uses destination's pool so that committing
+        // it does not change which pool destination draws from.
+        Ciphertext result(destination.pool());
+        result = encrypteds[0];
         for (size_t i = 1; i < encrypteds.size(); i++)
         {
-            add_inplace(destination, encrypteds[i]);
+            add_inplace(result, encrypteds[i]);
         }
+        destination = std::move(result);
     }
 
     void Evaluator::sub_inplace(Ciphertext &encrypted1, const Ciphertext &encrypted2) const
@@ -1150,6 +1162,12 @@ namespace seal
         {
             throw invalid_argument("encrypted is not valid for encryption parameters");
         }
+        // The early return below skips switch_key_inplace, which is what would otherwise
+        // validate the ciphertext, so check it here.
+        if (!is_metadata_valid_for(encrypted, context_) || !is_buffer_valid(encrypted))
+        {
+            throw invalid_argument("encrypted is not valid for encryption parameters");
+        }
         if (relin_keys.parms_id() != context_.key_parms_id())
         {
             throw invalid_argument("relin_keys is not valid for encryption parameters");
@@ -1450,7 +1468,13 @@ namespace seal
 
     void Evaluator::mod_switch_to_inplace(Ciphertext &encrypted, parms_id_type parms_id, MemoryPoolHandle pool) const
     {
-        // Verify parameters.
+        // Verify parameters. The loop below performs no iterations when encrypted is already at
+        // the target level, so validate it here rather than relying on mod_switch_to_next_inplace.
+        if (!is_metadata_valid_for(encrypted, context_) || !is_buffer_valid(encrypted))
+        {
+            throw invalid_argument("encrypted is not valid for encryption parameters");
+        }
+
         auto context_data_ptr = context_.get_context_data(encrypted.parms_id());
         auto target_context_data_ptr = context_.get_context_data(parms_id);
         if (!context_data_ptr)
@@ -1624,7 +1648,13 @@ namespace seal
 
     void Evaluator::mod_reduce_to_inplace(Ciphertext &encrypted, parms_id_type parms_id, MemoryPoolHandle pool) const
     {
-        // Verify parameters.
+        // Verify parameters. The loop below performs no iterations when encrypted is already at
+        // the target level, so validate it here rather than relying on mod_reduce_to_next_inplace.
+        if (!is_metadata_valid_for(encrypted, context_) || !is_buffer_valid(encrypted))
+        {
+            throw invalid_argument("encrypted is not valid for encryption parameters");
+        }
+
         auto context_data_ptr = context_.get_context_data(encrypted.parms_id());
         auto target_context_data_ptr = context_.get_context_data(parms_id);
         if (!context_data_ptr)
@@ -1670,6 +1700,13 @@ namespace seal
         // There is at least one ciphertext
         auto context_data_ptr = context_.get_context_data(encrypteds[0].parms_id());
         if (!context_data_ptr)
+        {
+            throw invalid_argument("encrypteds is not valid for encryption parameters");
+        }
+
+        // The single-ciphertext path below returns without reaching multiply, which is what
+        // would otherwise validate the inputs, so check them here.
+        if (!is_metadata_valid_for(encrypteds[0], context_) || !is_buffer_valid(encrypteds[0]))
         {
             throw invalid_argument("encrypteds is not valid for encryption parameters");
         }
@@ -1729,6 +1766,12 @@ namespace seal
         // Verify parameters.
         auto context_data_ptr = context_.get_context_data(encrypted.parms_id());
         if (!context_data_ptr)
+        {
+            throw invalid_argument("encrypted is not valid for encryption parameters");
+        }
+        // The exponent == 1 path below returns without reaching multiply_many, which is what
+        // would otherwise validate the ciphertext, so check it here.
+        if (!is_metadata_valid_for(encrypted, context_) || !is_buffer_valid(encrypted))
         {
             throw invalid_argument("encrypted is not valid for encryption parameters");
         }
@@ -2004,6 +2047,12 @@ namespace seal
         }
         else
         {
+            // multiply_plain_ntt below requires a matching parms_id, but the transform mutates
+            // encrypted, so verify the match before that rather than after.
+            if (encrypted.parms_id() != plain.parms_id())
+            {
+                throw invalid_argument("encrypted and plain parameter mismatch");
+            }
             transform_to_ntt_inplace(encrypted);
             multiply_plain_ntt(encrypted, plain);
             transform_from_ntt_inplace(encrypted);
@@ -2443,6 +2492,25 @@ namespace seal
         if (scheme == scheme_type::bgv && !encrypted.is_ntt_form())
         {
             throw invalid_argument("BGV encrypted must be in NTT form");
+        }
+
+        // The selected key material is also validated by the switch_key_inplace call below, but
+        // verify it here before mutating the operand.
+        if (!context_.using_keyswitching())
+        {
+            throw logic_error("keyswitching is not supported by the context");
+        }
+        auto &key_vector = galois_keys.data(GaloisKeys::get_index(galois_elt));
+        if (key_vector.size() < coeff_modulus_size)
+        {
+            throw invalid_argument("kswitch_keys inner dimension is too small");
+        }
+        for (auto &each_key : key_vector)
+        {
+            if (!is_metadata_valid_for(each_key, context_) || !is_buffer_valid(each_key))
+            {
+                throw invalid_argument("kswitch_keys is not valid for encryption parameters");
+            }
         }
 
         SEAL_ALLOCATE_GET_RNS_ITER(temp, coeff_count, coeff_modulus_size, pool);

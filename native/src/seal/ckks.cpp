@@ -250,7 +250,11 @@ namespace seal
             throw logic_error("invalid parameters");
         }
 
-        int coeff_bit_count = get_significant_bit_count(static_cast<uint64_t>(llabs(value))) + 2;
+        // Compute the magnitude in unsigned arithmetic so that INT64_MIN, whose negation is
+        // not representable as a signed integer, is handled correctly.
+        uint64_t magnitude = (value < 0) ? (0 - static_cast<uint64_t>(value)) : static_cast<uint64_t>(value);
+
+        int coeff_bit_count = get_significant_bit_count(magnitude) + 2;
         if (coeff_bit_count >= context_data.total_coeff_modulus_bit_count())
         {
             throw invalid_argument("encoded value is too large");
@@ -262,24 +266,17 @@ namespace seal
         destination.parms_id() = parms_id_zero;
         destination.resize(coeff_count * coeff_modulus_size);
 
-        if (value < 0)
+        for (size_t j = 0; j < coeff_modulus_size; j++)
         {
-            for (size_t j = 0; j < coeff_modulus_size; j++)
+            // Reduce the magnitude before negating: negate_uint_mod requires a representative
+            // that is already less than the modulus. Negating the reduced residue gives the
+            // correct value whether or not the magnitude exceeds this modulus.
+            uint64_t tmp = barrett_reduce_64(magnitude, coeff_modulus[j]);
+            if (value < 0)
             {
-                uint64_t tmp = static_cast<uint64_t>(value);
-                tmp += coeff_modulus[j].value();
-                tmp = barrett_reduce_64(tmp, coeff_modulus[j]);
-                fill_n(destination.data() + (j * coeff_count), coeff_count, tmp);
+                tmp = negate_uint_mod(tmp, coeff_modulus[j]);
             }
-        }
-        else
-        {
-            for (size_t j = 0; j < coeff_modulus_size; j++)
-            {
-                uint64_t tmp = static_cast<uint64_t>(value);
-                tmp = barrett_reduce_64(tmp, coeff_modulus[j]);
-                fill_n(destination.data() + (j * coeff_count), coeff_count, tmp);
-            }
+            fill_n(destination.data() + (j * coeff_count), coeff_count, tmp);
         }
 
         destination.parms_id() = parms_id;

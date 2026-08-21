@@ -23,18 +23,23 @@ namespace seal
         {
             std::vector<int> res;
 
-            // Record the sign of the original value and compute abs
+            // Record the sign of the original value and compute its magnitude. The magnitude is
+            // computed in unsigned arithmetic because INT_MIN has no representable negation.
             bool sign = value < 0;
-            value = std::abs(value);
+            unsigned int magnitude =
+                (value < 0) ? (0u - static_cast<unsigned int>(value)) : static_cast<unsigned int>(value);
 
             // Transform to non-adjacent form (NAF)
-            for (int i = 0; value; i++)
+            for (int i = 0; magnitude; i++)
             {
-                int zi = (value & int(0x1)) ? 2 - (value & int(0x3)) : 0;
-                value = (value - zi) >> 1;
+                int zi = (magnitude & 1u) ? 2 - static_cast<int>(magnitude & 0x3u) : 0;
+                magnitude = (magnitude - static_cast<unsigned int>(zi)) >> 1;
                 if (zi)
                 {
-                    res.push_back((sign ? -zi : zi) * (1 << i));
+                    // Form the term in a wider type so that a term of 2^31 cannot overflow
+                    // while it is being computed.
+                    std::int64_t term = static_cast<std::int64_t>(sign ? -zi : zi) * (std::int64_t(1) << i);
+                    res.push_back(safe_cast<int>(term));
                 }
             }
 

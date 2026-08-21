@@ -662,4 +662,70 @@ namespace sealtest
         EXPECT_EQ(S_OK, SEALContext_Destroy(context));
         EXPECT_EQ(S_OK, EncParams_Destroy(parms));
     }
+
+    TEST(CAbiStateConsistencyTest, SwapDataKeepsCoeffCountInSync)
+    {
+        void *plain = nullptr;
+        ASSERT_EQ(S_OK, Plaintext_Create2(4, nullptr, &plain));
+        for (uint64_t i = 0; i < 4; i++)
+        {
+            ASSERT_EQ(S_OK, Plaintext_SetCoeffAt(plain, i, i + 1));
+        }
+
+        uint64_t shorter[1]{ 7 };
+        ASSERT_EQ(S_OK, Plaintext_SwapData(plain, 1, shorter));
+
+        uint64_t coeff_count = 0;
+        ASSERT_EQ(S_OK, Plaintext_CoeffCount(plain, &coeff_count));
+        EXPECT_EQ(1ULL, coeff_count);
+
+        // Readers index the buffer with coeff_count, so they must stay within the new length.
+        uint64_t significant = 0;
+        ASSERT_EQ(S_OK, Plaintext_SignificantCoeffCount(plain, &significant));
+        EXPECT_LE(significant, coeff_count);
+
+        uint64_t nonzero = 0;
+        ASSERT_EQ(S_OK, Plaintext_NonZeroCoeffCount(plain, &nonzero));
+        EXPECT_LE(nonzero, coeff_count);
+
+        uint64_t length = 0;
+        ASSERT_EQ(S_OK, Plaintext_ToString(plain, nullptr, &length));
+        std::vector<char> buffer(length + 1, '\0');
+        ASSERT_EQ(S_OK, Plaintext_ToString(plain, buffer.data(), &length));
+        EXPECT_STREQ("7", buffer.data());
+
+        // Growing works the same way.
+        uint64_t longer[3]{ 1, 0, 2 };
+        ASSERT_EQ(S_OK, Plaintext_SwapData(plain, 3, longer));
+        ASSERT_EQ(S_OK, Plaintext_CoeffCount(plain, &coeff_count));
+        EXPECT_EQ(3ULL, coeff_count);
+        ASSERT_EQ(S_OK, Plaintext_SignificantCoeffCount(plain, &significant));
+        EXPECT_EQ(3ULL, significant);
+
+        EXPECT_EQ(S_OK, Plaintext_Destroy(plain));
+    }
+
+    TEST(CAbiStateConsistencyTest, SwapDataRejectsResizeOfNTTForm)
+    {
+        void *plain = nullptr;
+        ASSERT_EQ(S_OK, Plaintext_Create2(4, nullptr, &plain));
+
+        uint64_t ntt_parms_id[]{ 1ULL, 2ULL, 3ULL, 4ULL };
+        ASSERT_EQ(S_OK, Plaintext_SetParmsId(plain, ntt_parms_id));
+
+        uint64_t shorter[1]{ 7 };
+        EXPECT_EQ(COR_E_INVALIDOPERATION, Plaintext_SwapData(plain, 1, shorter));
+
+        uint64_t coeff_count = 0;
+        ASSERT_EQ(S_OK, Plaintext_CoeffCount(plain, &coeff_count));
+        EXPECT_EQ(4ULL, coeff_count);
+
+        // A same-length replacement preserves every invariant and is still allowed.
+        uint64_t same[4]{ 9, 0, 0, 0 };
+        EXPECT_EQ(S_OK, Plaintext_SwapData(plain, 4, same));
+        ASSERT_EQ(S_OK, Plaintext_CoeffCount(plain, &coeff_count));
+        EXPECT_EQ(4ULL, coeff_count);
+
+        EXPECT_EQ(S_OK, Plaintext_Destroy(plain));
+    }
 } // namespace sealtest

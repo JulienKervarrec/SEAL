@@ -65,12 +65,15 @@ namespace seal
                 // Extract sign of steps. When steps is positive, the rotation
                 // is to the left; when steps is negative, it is to the right.
                 bool sign = step < 0;
-                uint32_t pos_step = safe_cast<uint32_t>(abs(step));
+                // Compute the magnitude in unsigned arithmetic so that INT_MIN, whose negation
+                // is not representable as a signed integer, is handled correctly.
+                uint64_t magnitude = (step < 0) ? (0 - static_cast<uint64_t>(step)) : static_cast<uint64_t>(step);
 
-                if (pos_step >= (n >> 1))
+                if (magnitude >= static_cast<uint64_t>(n >> 1))
                 {
                     throw invalid_argument("step count too large");
                 }
+                uint32_t pos_step = static_cast<uint32_t>(magnitude);
 
                 pos_step &= m32 - 1;
                 if (sign)
