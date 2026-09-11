@@ -1,3 +1,7 @@
+## Parcours français
+
+Un parcours technique en français sur BFV, BGV, CKKS et les limites de sécurité de Microsoft SEAL est disponible dans [`docs/fr/`](docs/fr/).
+
 # Microsoft SEAL
 
 > [!IMPORTANT]
